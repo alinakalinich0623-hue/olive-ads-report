@@ -1,0 +1,46 @@
+name: Обновление данных из Meta Ads
+
+on:
+  schedule:
+    # каждый час, в :05 по UTC (Meta отдаёт статистику с задержкой)
+    - cron: "5 * * * *"
+  workflow_dispatch: {}   # кнопка «Run workflow» для обновления вручную
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Установить зависимости
+        run: pip install --quiet requests
+
+      - name: Выгрузить статистику из Meta Ads
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_AD_ACCOUNT_ID: ${{ vars.META_AD_ACCOUNT_ID || 'act_1117251293638187' }}
+          START_DATE: ${{ vars.START_DATE || '2025-12-12' }}
+        run: python scripts/fetch_meta.py
+
+      - name: Закоммитить обновлённые данные
+        run: |
+          git config user.name "olive-ads-bot"
+          git config user.email "actions@github.com"
+          if git diff --quiet -- data.json; then
+            echo "Данные не изменились — коммит не нужен"
+          else
+            git add data.json
+            git commit -m "data: автообновление $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
