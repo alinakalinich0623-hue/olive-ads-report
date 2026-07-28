@@ -67,13 +67,13 @@ def api_get(path, params, tries=4):
                     body = r.text[:500]
                     last_err = f"HTTP {r.status_code}: {body}"
                     if "rate limit" in body.lower() or r.status_code in (429, 500, 503):
-                        time.sleep(20 * (attempt + 1))
+                        time.sleep(8 * (attempt + 1))
                         continue
                     raise SystemExit(f"ОШИБКА Meta API: {last_err}")
                 r.raise_for_status()
             except requests.RequestException as e:
                 last_err = str(e)
-                time.sleep(10 * (attempt + 1))
+                time.sleep(5 * (attempt + 1))
         else:
             raise SystemExit(f"ОШИБКА Meta API после {tries} попыток: {last_err}")
 
@@ -147,26 +147,25 @@ def merge(acc, row):
 def creative_formats():
     """ad_id -> VIDEO / SHARE и ad_name -> VIDEO / SHARE (видео или баннер)."""
     by_id, by_name = {}, {}
-    try:
-        ads = api_get(
-            f"{ACCOUNT}/ads",
-            {
-                "fields": "id,name,creative{object_type,video_id,object_story_spec}",
-                "limit": 200,
-            },
-        )
-    except SystemExit as e:
-        print("Предупреждение: не удалось прочитать креативы:", e)
+    ads = None
+    # Meta отдаёт HTTP 500 «reduce the amount of data», если просить много за раз,
+    # поэтому спускаемся по размеру страницы, пока не получится
+    for page in (50, 25, 10):
+        try:
+            ads = api_get(
+                f"{ACCOUNT}/ads",
+                {"fields": "id,name,creative{object_type,video_id}", "limit": page},
+            )
+            break
+        except SystemExit as e:
+            print(f"Креативы: страница по {page} не прошла ({str(e)[:120]}), пробую меньше")
+    if ads is None:
+        print("Предупреждение: формат креативов определить не удалось, всё помечено как баннер")
         return by_id, by_name
 
     for a in ads:
         cr = a.get("creative") or {}
-        spec = cr.get("object_story_spec") or {}
-        has_video = bool(
-            cr.get("video_id")
-            or (spec.get("video_data") or {}).get("video_id")
-            or ((spec.get("link_data") or {}).get("video_id"))
-        )
+        has_video = bool(cr.get("video_id"))
         ot = cr.get("object_type")
         fmt = "VIDEO" if (has_video or ot == "VIDEO") else "SHARE"
         if a.get("id"):
