@@ -106,7 +106,7 @@ def num(row, key):
 
 INSIGHT_FIELDS = (
     "spend,impressions,reach,inline_link_clicks,actions,action_values,"
-    "campaign_name,objective,ad_name"
+    "campaign_name,objective,ad_name,ad_id"
 )
 
 
@@ -145,23 +145,38 @@ def merge(acc, row):
 
 
 def creative_formats():
-    """ad_name -> VIDEO / SHARE (видео или баннер)."""
-    out = {}
+    """ad_id -> VIDEO / SHARE и ad_name -> VIDEO / SHARE (видео или баннер)."""
+    by_id, by_name = {}, {}
     try:
-        ads = api_get(f"{ACCOUNT}/ads", {"fields": "name,creative{object_type,video_id}"})
-    except SystemExit:
-        return out
+        ads = api_get(
+            f"{ACCOUNT}/ads",
+            {
+                "fields": "id,name,creative{object_type,video_id,object_story_spec}",
+                "limit": 200,
+            },
+        )
+    except SystemExit as e:
+        print("Предупреждение: не удалось прочитать креативы:", e)
+        return by_id, by_name
+
     for a in ads:
         cr = a.get("creative") or {}
+        spec = cr.get("object_story_spec") or {}
+        has_video = bool(
+            cr.get("video_id")
+            or (spec.get("video_data") or {}).get("video_id")
+            or ((spec.get("link_data") or {}).get("video_id"))
+        )
         ot = cr.get("object_type")
-        if cr.get("video_id") or ot == "VIDEO":
-            fmt = "VIDEO"
-        elif ot in ("SHARE", "PHOTO", "LINK", None):
-            fmt = "SHARE"
-        else:
-            fmt = ot
-        out[a.get("name", "")] = fmt
-    return out
+        fmt = "VIDEO" if (has_video or ot == "VIDEO") else "SHARE"
+        if a.get("id"):
+            by_id[a["id"]] = fmt
+        if a.get("name"):
+            by_name[a["name"]] = fmt
+
+    vids = sum(1 for v in by_id.values() if v == "VIDEO")
+    print(f"Креативов прочитано: {len(by_id)} (видео: {vids}, баннеры: {len(by_id) - vids})")
+    return by_id, by_name
 
 
 def main():
@@ -219,11 +234,14 @@ def main():
     print(f"Кампаний: {len(campaigns)}")
 
     # --- объявления (креативы) ---
-    fmt_map = creative_formats()
+    fmt_by_id, fmt_by_name = creative_formats()
     ad_map = {}
     for r in insights("ad"):
         name = r.get("ad_name") or "—"
-        a = ad_map.setdefault(name, {"name": name, "fmt": fmt_map.get(name, "SHARE")})
+        fmt = fmt_by_id.get(r.get("ad_id")) or fmt_by_name.get(name) or "SHARE"
+        a = ad_map.setdefault(name, {"name": name, "fmt": fmt})
+        if a["fmt"] == "SHARE" and fmt == "VIDEO":
+            a["fmt"] = "VIDEO"
         merge(a, base_row(r))
     ads = []
     for a in ad_map.values():
