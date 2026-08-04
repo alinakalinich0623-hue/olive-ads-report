@@ -43,6 +43,16 @@ jobs:
           NEW_ONLY: ${{ vars.NEW_ONLY || '1' }}
         run: python scripts/fetch_bitrix.py
 
+      # Ступени воронки: визиты/посетители из Яндекс.Метрики и OTP из бэкенда olive.kz.
+      # Секретов нет — шаг просто пропускает эти ступени, сборка не падает.
+      - name: Дописать ступени воронки
+        env:
+          METRIKA_TOKEN: ${{ secrets.METRIKA_TOKEN }}
+          METRIKA_COUNTER: ${{ vars.METRIKA_COUNTER || '104935856' }}
+          OLIVE_API_URL: ${{ secrets.OLIVE_API_URL }}
+          OLIVE_API_KEY: ${{ secrets.OLIVE_API_KEY }}
+        run: python scripts/fetch_extra.py
+
       - name: Закоммитить обновлённые данные
         run: |
           git config user.name "olive-ads-bot"
