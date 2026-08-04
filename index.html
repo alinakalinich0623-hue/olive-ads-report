@@ -120,6 +120,13 @@ tbody tr:hover{background:#fafcf2;}
     <h2>Заявки и продажи из Битрикса</h2>
     <div class="hint" id="bxhint"></div>
     <div class="kpis" id="bxkpis"></div>
+
+  <div class="section" id="fnsection" style="display:none">
+    <h2>Воронка: от клика до покупки</h2>
+    <div class="hint" id="fnhint"></div>
+    <div class="kpis" id="fnsteps"></div>
+    <div class="cardbox" style="margin-top:12px"><canvas id="cf" height="150"></canvas></div>
+  </div>
   </div>
 
   <div class="section">
@@ -248,6 +255,59 @@ document.getElementById("bxhint").textContent =
 " Цифра сквозная: UTM в сделках не заполнены, поэтому в знаменателе все оплаты, а не только рекламные.";
 }
 
+
+function renderFunnel(rows){
+const sec = document.getElementById("fnsection");
+const DEF = [
+{k:"clicks", n:"Клики по рекламе", c:"#7C5CD6"},
+{k:"visits", n:"Визиты на сайте", c:"#2E86C1"},
+{k:"users", n:"Посетители сайта", c:"#17A2B8"},
+{k:"otp", n:"OTP подтверждён", c:"#27AE60"},
+{k:"bleads", n:"Заявки (Битрикс)", c:"#E08A00"},
+{k:"sales", n:"Покупки", c:"#E8590C"}
+];
+const steps = DEF.filter(s => rows.some(r => r[s.k] != null));
+if(steps.length < 2){ sec.style.display = "none"; return; }
+sec.style.display = "";
+
+const tot = {}; steps.forEach(s => tot[s.k] = sum(rows, s.k));
+const revenue = sum(rows,"sales_revenue");
+
+document.getElementById("fnsteps").innerHTML = steps.map((s,i)=>{
+const v = tot[s.k];
+let sub;
+if(i === 0){ sub = "верх воронки"; }
+else { const prev = tot[steps[i-1].k]; sub = prev ? ("из предыдущей " + fmt2(v/prev*100) + "%") : "\u2014"; }
+return '<div class="kpi"><div class="l">' + s.n + '</div><div class="v">' + fmtNum(v) + '</div><div class="s">' + sub + '</div></div>';
+}).join("");
+
+const top = tot[steps[0].k], bottom = tot[steps[steps.length-1].k];
+document.getElementById("fnhint").textContent =
+"За выбранный период. Сквозная конверсия " + (top ? fmt2(bottom/top*100) : "0") + "% \u2014 из " +
+fmtNum(top) + " в " + fmtNum(bottom) + "." +
+(revenue ? (" Выручка " + (Math.round(revenue)||0).toLocaleString("ru-RU") + " \u20b8.") : "") +
+(steps.length < 6 ? " Ступени «визиты», «посетители» и OTP появятся, когда подключим Яндекс.Метрику и бэкенд сайта." : "");
+
+const labels = rows.map(x=>x.date.slice(5));
+const grid = {grid:{color:"#eef1e8"},ticks:{color:"#8a9378",font:{size:10}}};
+const ds = steps.map(s => ({
+label: s.n,
+data: rows.map(r => r[s.k]||0),
+backgroundColor: s.c,
+borderColor: s.c,
+type: s.k === "sales" ? "line" : "bar",
+tension: .3,
+pointRadius: 0,
+yAxisID: s.k === "sales" ? "y1" : "y"
+}));
+mkChart("cf", {type:"bar", data:{labels, datasets:ds}, options:{
+responsive:true,
+plugins:{legend:{labels:{boxWidth:10,font:{size:11},color:"#3a4232"}},
+title:{display:true,text:"Воронка по дням",color:"#12160f",font:{size:13,weight:"700"}}},
+scales:{x:grid, y:{...grid, position:"left"}, y1:{...grid, position:"right", grid:{drawOnChartArea:false}}}
+}});
+}
+
 function mkChart(id,cfg){ if(typeof Chart==="undefined") return; if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id),cfg); }
 
 function renderCharts(rows){
@@ -352,7 +412,7 @@ function apply(mode){
   if(rows.length){
     document.getElementById("plabel").textContent="Период: "+rows[0].date+" — "+rows[rows.length-1].date+" · "+rows.length+" дн.";
   }
-  renderKPIs(rows); renderCharts(rows); renderBitrix(rows);
+  renderKPIs(rows); renderCharts(rows); renderBitrix(rows); renderFunnel(rows);
 }
 
 let currentMode = "all";
