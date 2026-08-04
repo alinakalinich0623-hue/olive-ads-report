@@ -125,7 +125,10 @@ tbody tr:hover{background:#fafcf2;}
     <h2>Воронка: от клика до покупки</h2>
     <div class="hint" id="fnhint"></div>
     <div class="kpis" id="fnsteps"></div>
-    <div class="cardbox" style="margin-top:12px"><canvas id="cf" height="150"></canvas></div>
+    <div class="chartgrid" style="margin-top:12px">
+      <div class="cardbox"><canvas id="cf" height="150"></canvas></div>
+      <div class="cardbox"><canvas id="cf2" height="150"></canvas></div>
+    </div>
   </div>
   </div>
 
@@ -290,24 +293,38 @@ fmtNum(top) + " в " + fmtNum(bottom) + "." +
 
 const labels = rows.map(x=>x.date.slice(5));
 const grid = {grid:{color:"#eef1e8"},ticks:{color:"#8a9378",font:{size:10}}};
-const ds = steps.map(s => ({
+
+mkChart("cf", {type:"bar", data:{labels, datasets: steps.map(s => ({
 label: s.n,
-data: rows.map(r => r[s.k]||0),
+data: rows.map(r => (r[s.k]||0) || null),
 backgroundColor: s.c,
 borderColor: s.c,
 type: s.k === "sales" ? "line" : "bar",
-tension: .3,
-pointRadius: 0,
-yAxisID: s.k === "sales" ? "y1" : "y"
-}));
-mkChart("cf", {type:"bar", data:{labels, datasets:ds}, options:{
+tension: .3, pointRadius: 0, spanGaps: true
+}))}, options:{
 responsive:true,
 plugins:{legend:{labels:{boxWidth:10,font:{size:11},color:"#3a4232"}},
-title:{display:true,text:"Воронка по дням",color:"#12160f",font:{size:13,weight:"700"}}},
-scales:{x:grid, y:{...grid, position:"left"}, y1:{...grid, position:"right", grid:{drawOnChartArea:false}}}
+title:{display:true,text:"Объёмы по дням · логарифмическая шкала",color:"#12160f",font:{size:13,weight:"700"}}},
+scales:{x:grid, y:{...grid, type:"logarithmic"}}
+}});
+
+const pct = (a,b) => b ? +(a/b*100).toFixed(2) : null;
+const conv = [];
+for(let i = 1; i < steps.length; i++){
+const cur = steps[i], prev = steps[i-1];
+conv.push({label: prev.n + " \u2192 " + cur.n, color: cur.c,
+data: rows.map(r => pct(r[cur.k]||0, r[prev.k]||0))});
+}
+mkChart("cf2", {type:"line", data:{labels, datasets: conv.map(c => ({
+label: c.label, data: c.data, borderColor: c.color, backgroundColor: c.color + "22",
+tension:.3, pointRadius:0, spanGaps:true
+}))}, options:{
+responsive:true,
+plugins:{legend:{labels:{boxWidth:10,font:{size:11},color:"#3a4232"}},
+title:{display:true,text:"Конверсия между ступенями, %",color:"#12160f",font:{size:13,weight:"700"}}},
+scales:{x:grid, y:{...grid, ticks:{color:"#8a9378",font:{size:10},callback:v=>v+"%"}}}
 }});
 }
-
 function mkChart(id,cfg){ if(typeof Chart==="undefined") return; if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id),cfg); }
 
 function renderCharts(rows){
