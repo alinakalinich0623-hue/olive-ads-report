@@ -439,40 +439,71 @@ if (parts < 2){ document.getElementById("fnwhint").textContent = "Мало да�
 const size = Math.ceil(rows.length / parts);
 const buckets = [];
 for (let i = 0; i < rows.length; i += size) buckets.push(rows.slice(i, i + size));
-const colW = W / buckets.length, padX = 26;
-const topY = 44, botY = H - 30;
-const stepH = (botY - topY) / stages.length;
-const convOf = b => stages.map((s, i) => i === 0 ? null : (sum(b, stages[i-1].k) ? sum(b, s.k) / sum(b, stages[i-1].k) * 100 : null));
-const base = convOf(buckets[0]);
+const colW = W / buckets.length, padX = 26, topY = 46, botY = H - 26;
+
+// Ступень попадает в воронку только если по ней реально есть данные за этот период.
+// Заявки в Битриксе ведутся не с самого начала, поэтому на ранних отрезках их нет.
+const activeOf = b => stages.filter(s => sum(b, s.k) > 0);
+let missing = false, broken = false;
+
+const convMap = b => { const st = activeOf(b), m = {};
+for (let i = 1; i < st.length; i++){ const p = sum(b, st[i-1].k); m[st[i].k] = p ? sum(b, st[i].k)/p*100 : null; }
+return m; };
+const base = convMap(buckets[0]);
 
 buckets.forEach((b, bi) => {
-const x0 = colW * bi, cxc = x0 + colW / 2;
-const tots = stages.map(s => sum(b, s.k));
-const head = tots[0] || 1;
-const maxW = colW - padX * 2;
-const wOf = v => Math.max(3, Math.sqrt(v / head) * maxW);
-const t = fnEl("text", {x:cxc, y:20, "text-anchor":"middle", fill:"#12160f", "font-size":12, "font-weight":"700"});
+const st = activeOf(b);
+if (st.length < stages.length) missing = true;
+const cxc = colW * bi + colW / 2;
+const tots = st.map(s => sum(b, s.k));
+const head = tots[0] || 1, maxW = colW - padX * 2;
+const stepH = (botY - topY) / Math.max(1, st.length);
+
+// Ширина в масштабе корня. Если ступень оказалась шире предыдущей — значит
+// часть оплат пришла мимо этой воронки; зажимаем ширину и помечаем звёздочкой.
+const w = [];
+tots.forEach((v, i) => { let x = Math.max(3, Math.sqrt(v / head) * maxW);
+if (i && x > w[i-1]){ x = w[i-1]; broken = true; } w.push(x); });
+
+const t = fnEl("text", {x:cxc, y:18, "text-anchor":"middle", fill:"#12160f", "font-size":12, "font-weight":"700"});
 t.textContent = b[0].date.slice(5) + " \u2014 " + b[b.length-1].date.slice(5);
 svg.appendChild(t);
-const conv = convOf(b);
-stages.forEach((s, i) => {
-const yTop2 = topY + stepH * i, yBot = yTop2 + stepH * 0.62;
-const w1 = wOf(tots[i]), w2 = wOf(tots[i+1] != null ? tots[i+1] : tots[i]);
-svg.appendChild(fnEl("path", {d:"M" + (cxc-w1/2) + "," + yTop2 + "L" + (cxc+w1/2) + "," + yTop2 + "L" + (cxc+w2/2) + "," + yBot + "L" + (cxc-w2/2) + "," + yBot + "Z", fill:s.c, opacity:0.92}));
-const lb = fnEl("text", {x:cxc, y:yTop2+stepH*0.4, "text-anchor":"middle", fill:"#fff", "font-size":11, "font-weight":"700"});
+
+if (st.length < stages.length){
+const miss = stages.filter(s => !st.includes(s)).map(s => s.n.split(" ")[0]).join(", ");
+const m = fnEl("text", {x:cxc, y:33, "text-anchor":"middle", fill:"#b0784a", "font-size":9.5});
+m.textContent = "нет данных: " + miss;
+svg.appendChild(m);
+}
+
+const conv = convMap(b);
+st.forEach((s, i) => {
+const yT = topY + stepH * i, yB = yT + stepH * 0.6;
+const w1 = w[i], w2 = (i + 1 < w.length) ? w[i+1] : w[i] * 0.9;
+svg.appendChild(fnEl("path", {d:"M" + (cxc-w1/2) + "," + yT + "L" + (cxc+w1/2) + "," + yT +
+"L" + (cxc+w2/2) + "," + yB + "L" + (cxc-w2/2) + "," + yB + "Z", fill:s.c, opacity:0.92}));
+const lb = fnEl("text", {x:cxc, y:yT+stepH*0.38, "text-anchor":"middle", fill:"#fff", "font-size":11, "font-weight":"700"});
 lb.textContent = fmtNum(tots[i]);
 svg.appendChild(lb);
-if (i > 0 && conv[i] != null){
-const d = base[i] != null ? conv[i] - base[i] : 0;
-const cl = fnEl("text", {x:cxc, y:yTop2-4, "text-anchor":"middle", fill: bi === 0 ? "#6f7a63" : (d < -1 ? "#d64545" : d > 1 ? "#1f9d55" : "#6f7a63"), "font-size":10.5, "font-weight":"600"});
-cl.textContent = fmt2(conv[i]) + "%" + (bi > 0 && base[i] != null ? (d >= 0 ? "  +" : "  ") + fmt2(d) : "");
+
+if (i > 0){
+const c = conv[s.k];
+const over = c != null && c > 100;
+const bv = base[s.k];
+const d = (bi > 0 && bv != null && c != null) ? c - bv : null;
+const cl = fnEl("text", {x:cxc, y:yT-5, "text-anchor":"middle",
+fill: over ? "#d64545" : (d == null ? "#6f7a63" : (d < -1 ? "#d64545" : d > 1 ? "#1f9d55" : "#6f7a63")),
+"font-size":10.5, "font-weight":"600"});
+cl.textContent = c == null ? "\u2014" : (fmt2(c) + "%" + (over ? " *" : "") + (d != null ? (d >= 0 ? "  +" : "  ") + fmt2(d) : ""));
 svg.appendChild(cl);
 }
 });
 });
 
-document.getElementById("fnwhint").textContent =
-"Каждая воронка нормирована к своим кликам, поэтому сравнивается форма, а не объём трафика. Ширина в масштабе корня \u2014 иначе нижние ступени были бы неразличимы. Проценты \u2014 конверсия перехода; цветом показано отклонение от первого периода.";
+let note = "Каждая воронка нормирована к своим кликам: сравнивается форма, а не объём трафика. Ширина в масштабе корня \u2014 иначе нижние ступени были бы неразличимы. Проценты \u2014 конверсия перехода, цветом отклонение от первого периода.";
+if (missing) note += " Заявки в воронке «Первичная продажа» ведутся с 26.02.2026, поэтому на более ранних отрезках эта ступень не показывается.";
+if (broken) note += " Звёздочкой помечены переходы с конверсией выше 100%: часть оплат приходит мимо этой воронки \u2014 повторные покупки и сделки, заведённые менеджером вручную. Строгой вложенности там нет.";
+document.getElementById("fnwhint").textContent = note;
 }
 function mkChart(id,cfg){ if(typeof Chart==="undefined") return; if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id),cfg); }
 
