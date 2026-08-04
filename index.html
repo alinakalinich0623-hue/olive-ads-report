@@ -289,11 +289,14 @@ document.getElementById("fnhint").textContent =
 "За выбранный период. Сквозная конверсия " + (top ? fmt2(bottom/top*100) : "0") + "% \u2014 из " +
 fmtNum(top) + " в " + fmtNum(bottom) + "." +
 (revenue ? (" Выручка " + (Math.round(revenue)||0).toLocaleString("ru-RU") + " \u20b8.") : "") +
+" Конверсия считается скользящим окном в 7 дней: между заявкой и оплатой проходит несколько дней, поэтому деление день-в-день даёт бессмысленные скачки." +
 (steps.length < 6 ? " Ступени «визиты», «посетители» и OTP появятся, когда подключим Яндекс.Метрику и бэкенд сайта." : "");
 
 const labels = rows.map(x=>x.date.slice(5));
 const grid = {grid:{color:"#eef1e8"},ticks:{color:"#8a9378",font:{size:10}}};
 
+// Объёмы. Шкала логарифмическая: клики идут сотнями, покупки единицами,
+// на линейной шкале покупки превращаются в плоскую линию у нуля.
 mkChart("cf", {type:"bar", data:{labels, datasets: steps.map(s => ({
 label: s.n,
 data: rows.map(r => (r[s.k]||0) || null),
@@ -305,24 +308,30 @@ tension: .3, pointRadius: 0, spanGaps: true
 responsive:true,
 plugins:{legend:{labels:{boxWidth:10,font:{size:11},color:"#3a4232"}},
 title:{display:true,text:"Объёмы по дням · логарифмическая шкала",color:"#12160f",font:{size:13,weight:"700"}}},
-scales:{x:grid, y:{...grid, type:"logarithmic"}}
+scales:{x:grid, y:{...grid, type:"logarithmic",
+ticks:{color:"#8a9378",font:{size:10},callback:v=>Number(v).toLocaleString("ru-RU")}}}
 }});
 
-const pct = (a,b) => b ? +(a/b*100).toFixed(2) : null;
+// Конверсии. Скользящее окно 7 дней — иначе лаг между заявкой и оплатой
+// даёт всплески вроде 400%: платят те, кто оставил заявку несколько дней назад.
+const W = 7;
+const roll = (arr,i) => { let s = 0; for(let j = Math.max(0, i-W+1); j <= i; j++) s += arr[j]||0; return s; };
 const conv = [];
 for(let i = 1; i < steps.length; i++){
 const cur = steps[i], prev = steps[i-1];
+const a = rows.map(r => r[cur.k]||0), b = rows.map(r => r[prev.k]||0);
 conv.push({label: prev.n + " \u2192 " + cur.n, color: cur.c,
-data: rows.map(r => pct(r[cur.k]||0, r[prev.k]||0))});
+data: rows.map((r,j) => { const d = roll(b,j); return d ? +(roll(a,j)/d*100).toFixed(2) : null; })});
 }
 mkChart("cf2", {type:"line", data:{labels, datasets: conv.map(c => ({
 label: c.label, data: c.data, borderColor: c.color, backgroundColor: c.color + "22",
-tension:.3, pointRadius:0, spanGaps:true
+tension:.3, pointRadius:0, spanGaps:true, fill:true
 }))}, options:{
 responsive:true,
 plugins:{legend:{labels:{boxWidth:10,font:{size:11},color:"#3a4232"}},
-title:{display:true,text:"Конверсия между ступенями, %",color:"#12160f",font:{size:13,weight:"700"}}},
-scales:{x:grid, y:{...grid, ticks:{color:"#8a9378",font:{size:10},callback:v=>v+"%"}}}
+title:{display:true,text:"Конверсия между ступенями, % · окно 7 дней",color:"#12160f",font:{size:13,weight:"700"}}},
+scales:{x:grid, y:{...grid, beginAtZero:true,
+ticks:{color:"#8a9378",font:{size:10},callback:v=>v+"%"}}}
 }});
 }
 function mkChart(id,cfg){ if(typeof Chart==="undefined") return; if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id),cfg); }
