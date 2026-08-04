@@ -75,6 +75,24 @@ tbody tr:hover{background:#fafcf2;}
 .status button:hover{border-color:var(--lime-d);}
 .status .spacer{margin-left:auto;}
 
+.fnchips{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;margin-bottom:12px;border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:#fafbf5}
+.fnchips-t{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:0 8px 0 2px}
+.fnchip{display:inline-flex;align-items:center;gap:8px;cursor:pointer;border:none;background:transparent;border-radius:6px;padding:6px 9px;font-size:13px;font-weight:600;color:var(--ink);font-family:inherit}
+.fnchip:hover{background:#eef1e5}
+.fnchip .cb{width:15px;height:15px;border-radius:4px;border:2px solid var(--ck);background:var(--ck);flex:none}
+.fnchip .sw{width:16px;height:11px;border-radius:3px;background:var(--ck);flex:none}
+.fnchip .sw.line{height:0;border-top:3px solid var(--ck);border-radius:0;background:none}
+.fnchip.off .cb{background:transparent}
+.fnchip.off .sw,.fnchip.off .nm{opacity:.38}
+.fnchip.off .nm{text-decoration:line-through}
+.fnplot{position:relative}
+.fnplot svg{display:block;width:100%;height:auto}
+.fntip{position:absolute;pointer-events:none;opacity:0;transition:opacity .1s;background:rgba(17,24,39,.96);color:#fff;border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.6;min-width:210px;z-index:5}
+.fntip.on{opacity:1}
+.fntip .d{font-size:10.5px;letter-spacing:.08em;color:#9aa1ac;text-transform:uppercase;margin-bottom:6px}
+.fntip .r{display:flex;justify-content:space-between;gap:16px;white-space:nowrap}
+.fntip .r i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:7px}
+.fntip .cv{margin-top:7px;padding-top:7px;border-top:1px solid #374151;color:#c3cad3;font-size:11.5px}
 </style>
 </head>
 <body>
@@ -125,9 +143,14 @@ tbody tr:hover{background:#fafcf2;}
     <h2>Воронка: от клика до покупки</h2>
     <div class="hint" id="fnhint"></div>
     <div class="kpis" id="fnsteps"></div>
-    <div class="chartgrid" style="margin-top:12px">
-      <div class="cardbox"><canvas id="cf" height="150"></canvas></div>
-      <div class="cardbox"><canvas id="cf2" height="150"></canvas></div>
+    <div class="cardbox" style="margin-top:12px">
+      <div class="fnchips" id="fnchips"></div>
+      <div class="fnplot"><svg id="fnsvg1" viewBox="0 0 1060 400" preserveAspectRatio="xMidYMid meet"></svg><div class="fntip" id="fntip"></div></div>
+    </div>
+    <div class="cardbox" style="margin-top:12px">
+      <h3 style="margin:0 0 3px;font-size:14px;font-weight:800">Воронка по периодам: где ломается конверсия</h3>
+      <div class="hint" id="fnwhint"></div>
+      <div class="fnplot"><svg id="fnsvg2" viewBox="0 0 1060 360" preserveAspectRatio="xMidYMid meet"></svg></div>
     </div>
   </div>
   </div>
@@ -259,80 +282,197 @@ document.getElementById("bxhint").textContent =
 }
 
 
+/* Воронка: вложенные столбики, переключатели, тултип с конверсиями,
+   воронки по периодам в корневом масштабе. Рисуется на SVG. */
+const FN_DEF = [
+{k:"clicks", n:"Клики по рекламе", c:"#7C5CD6", kind:"bar"},
+{k:"visits", n:"Визиты на сайте", c:"#2E86C1", kind:"bar"},
+{k:"users", n:"Посетители сайта", c:"#17A2B8", kind:"bar"},
+{k:"otp", n:"OTP подтверждён", c:"#27AE60", kind:"bar"},
+{k:"bleads", n:"Заявки (Битрикс)", c:"#E08A00", kind:"bar"},
+{k:"sales", n:"Покупки", c:"#E8590C", kind:"line"},
+{k:"sales_revenue", n:"Выручка", c:"#D63384", kind:"line", money:true}
+];
+const FN_ON = {};
+FN_DEF.forEach(s => FN_ON[s.k] = true);
+
+const fnNice = v => { if (v <= 0) return 10;
+const e = Math.pow(10, Math.floor(Math.log10(v))), m = v / e;
+return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * e; };
+const fnMoney = n => n >= 1e6 ? (n/1e6).toFixed(2).replace(".", ",") + " млн \u20b8"
+: Math.round(n).toLocaleString("ru-RU") + " \u20b8";
+const fnEl = (t, a) => { const e = document.createElementNS("http://www.w3.org/2000/svg", t);
+for (const k in a) e.setAttribute(k, a[k]); return e; };
+
 function renderFunnel(rows){
 const sec = document.getElementById("fnsection");
-const DEF = [
-{k:"clicks", n:"Клики по рекламе", c:"#7C5CD6"},
-{k:"visits", n:"Визиты на сайте", c:"#2E86C1"},
-{k:"users", n:"Посетители сайта", c:"#17A2B8"},
-{k:"otp", n:"OTP подтверждён", c:"#27AE60"},
-{k:"bleads", n:"Заявки (Битрикс)", c:"#E08A00"},
-{k:"sales", n:"Покупки", c:"#E8590C"}
-];
-const steps = DEF.filter(s => rows.some(r => r[s.k] != null));
-if(steps.length < 2){ sec.style.display = "none"; return; }
+const steps = FN_DEF.filter(s => rows.some(r => r[s.k] != null));
+const stages = steps.filter(s => s.k !== "sales_revenue");
+if (stages.length < 2 || !rows.length){ sec.style.display = "none"; return; }
 sec.style.display = "";
 
 const tot = {}; steps.forEach(s => tot[s.k] = sum(rows, s.k));
-const revenue = sum(rows,"sales_revenue");
 
-document.getElementById("fnsteps").innerHTML = steps.map((s,i)=>{
+document.getElementById("fnsteps").innerHTML = stages.map((s, i) => {
 const v = tot[s.k];
-let sub;
-if(i === 0){ sub = "верх воронки"; }
-else { const prev = tot[steps[i-1].k]; sub = prev ? ("из предыдущей " + fmt2(v/prev*100) + "%") : "\u2014"; }
+let sub = "верх воронки";
+if (i > 0){ const p = tot[stages[i-1].k]; sub = p ? ("из предыдущей " + fmt2(v/p*100) + "%") : "\u2014"; }
 return '<div class="kpi"><div class="l">' + s.n + '</div><div class="v">' + fmtNum(v) + '</div><div class="s">' + sub + '</div></div>';
 }).join("");
 
-const top = tot[steps[0].k], bottom = tot[steps[steps.length-1].k];
+const top = tot[stages[0].k], bottom = tot[stages[stages.length-1].k];
+const rev = tot["sales_revenue"] || 0;
 document.getElementById("fnhint").textContent =
-"За выбранный период. Сквозная конверсия " + (top ? fmt2(bottom/top*100) : "0") + "% \u2014 из " +
-fmtNum(top) + " в " + fmtNum(bottom) + "." +
-(revenue ? (" Выручка " + (Math.round(revenue)||0).toLocaleString("ru-RU") + " \u20b8.") : "") +
-" Конверсия считается скользящим окном в 7 дней: между заявкой и оплатой проходит несколько дней, поэтому деление день-в-день даёт бессмысленные скачки." +
-(steps.length < 6 ? " Ступени «визиты», «посетители» и OTP появятся, когда подключим Яндекс.Метрику и бэкенд сайта." : "");
+"Столбики вложены друг в друга: сужение показывает потери на каждом шаге. Сквозная конверсия " +
+(top ? fmt2(bottom/top*100) : "0") + "% \u2014 из " + fmtNum(top) + " в " + fmtNum(bottom) + "." +
+(rev ? (" Выручка " + fnMoney(rev) + ".") : "") +
+(stages.length < 5 ? " Ступени «визиты», «посетители» и OTP появятся, когда подключим Яндекс.Метрику и бэкенд сайта." : "");
 
-const labels = rows.map(x=>x.date.slice(5));
-const grid = {grid:{color:"#eef1e8"},ticks:{color:"#8a9378",font:{size:10}}};
-
-// Объёмы. Шкала логарифмическая: клики идут сотнями, покупки единицами,
-// на линейной шкале покупки превращаются в плоскую линию у нуля.
-mkChart("cf", {type:"bar", data:{labels, datasets: steps.map(s => ({
-label: s.n,
-data: rows.map(r => (r[s.k]||0) || null),
-backgroundColor: s.c,
-borderColor: s.c,
-type: s.k === "sales" ? "line" : "bar",
-tension: .3, pointRadius: 0, spanGaps: true
-}))}, options:{
-responsive:true,
-plugins:{legend:{labels:{boxWidth:10,font:{size:11},color:"#3a4232"}},
-title:{display:true,text:"Объёмы по дням · логарифмическая шкала",color:"#12160f",font:{size:13,weight:"700"}}},
-scales:{x:grid, y:{...grid, type:"logarithmic",
-ticks:{color:"#8a9378",font:{size:10},callback:v=>Number(v).toLocaleString("ru-RU")}}}
-}});
-
-// Конверсии. Скользящее окно 7 дней — иначе лаг между заявкой и оплатой
-// даёт всплески вроде 400%: платят те, кто оставил заявку несколько дней назад.
-const W = 7;
-const roll = (arr,i) => { let s = 0; for(let j = Math.max(0, i-W+1); j <= i; j++) s += arr[j]||0; return s; };
-const conv = [];
-for(let i = 1; i < steps.length; i++){
-const cur = steps[i], prev = steps[i-1];
-const a = rows.map(r => r[cur.k]||0), b = rows.map(r => r[prev.k]||0);
-conv.push({label: prev.n + " \u2192 " + cur.n, color: cur.c,
-data: rows.map((r,j) => { const d = roll(b,j); return d ? +(roll(a,j)/d*100).toFixed(2) : null; })});
+buildChips(steps, rows);
+drawVolumes(rows, steps);
+drawPeriods(rows, stages);
 }
-mkChart("cf2", {type:"line", data:{labels, datasets: conv.map(c => ({
-label: c.label, data: c.data, borderColor: c.color, backgroundColor: c.color + "22",
-tension:.3, pointRadius:0, spanGaps:true, fill:true
-}))}, options:{
-responsive:true,
-plugins:{legend:{labels:{boxWidth:10,font:{size:11},color:"#3a4232"}},
-title:{display:true,text:"Конверсия между ступенями, % · окно 7 дней",color:"#12160f",font:{size:13,weight:"700"}}},
-scales:{x:grid, y:{...grid, beginAtZero:true,
-ticks:{color:"#8a9378",font:{size:10},callback:v=>v+"%"}}}
-}});
+
+function buildChips(steps, rows){
+const box = document.getElementById("fnchips");
+box.innerHTML = '<span class="fnchips-t">Показать на графике</span>';
+steps.forEach(s => {
+const b = document.createElement("button");
+b.className = "fnchip" + (FN_ON[s.k] ? "" : " off");
+b.style.setProperty("--ck", s.c);
+b.innerHTML = '<span class="cb"></span><span class="sw' + (s.kind === "line" ? " line" : "") + '"></span><span class="nm">' + s.n + '</span>';
+b.onclick = () => { FN_ON[s.k] = !FN_ON[s.k]; b.classList.toggle("off", !FN_ON[s.k]); drawVolumes(rows, steps); };
+box.appendChild(b);
+});
+}
+
+function drawVolumes(rows, steps){
+const svg = document.getElementById("fnsvg1");
+svg.innerHTML = "";
+const W = 1060, H = 400, M = {l:58, r:96, t:16, b:34};
+const pw = W - M.l - M.r, ph = H - M.t - M.b;
+const bars = steps.filter(s => s.kind === "bar" && FN_ON[s.k]);
+const lines = steps.filter(s => s.kind === "line" && FN_ON[s.k]);
+const maxBar = Math.max(1, ...bars.flatMap(s => rows.map(r => r[s.k] || 0)));
+const yTop = fnNice(maxBar);
+const y = v => M.t + ph - (v / yTop) * ph;
+
+for (let i = 0; i <= 4; i++){
+const v = yTop * i / 4, yy = y(v);
+svg.appendChild(fnEl("line", {x1:M.l, x2:M.l+pw, y1:yy, y2:yy, stroke:"#eef1e8"}));
+const t = fnEl("text", {x:M.l-8, y:yy+3.5, "text-anchor":"end", fill:"#8a9378", "font-size":10.5});
+t.textContent = v >= 1000 ? (v/1000) + "k" : v;
+svg.appendChild(t);
+}
+
+const n = rows.length, step = pw / n;
+const cx = i => M.l + step * (i + 0.5);
+const wOf = i => Math.max(2, Math.min(24, step * 0.8) * Math.pow(0.62, i));
+
+bars.forEach((s, si) => {
+const w = wOf(si);
+rows.forEach((r, i) => {
+const v = r[s.k] || 0; if (v <= 0) return;
+const hh = M.t + ph - y(v);
+svg.appendChild(fnEl("rect", {x:cx(i)-w/2, y:y(v), width:w, height:Math.max(0.6, hh), fill:s.c, rx:1}));
+});
+});
+
+lines.forEach((s, li) => {
+const mx = Math.max(1, ...rows.map(r => r[s.k] || 0));
+const t2 = fnNice(mx);
+const yy = v => M.t + ph - (v / t2) * ph;
+let d = "";
+rows.forEach((r, i) => { d += (i ? "L" : "M") + cx(i).toFixed(1) + "," + yy(r[s.k] || 0).toFixed(1); });
+svg.appendChild(fnEl("path", {d, fill:"none", stroke:s.c, "stroke-width":2, "stroke-linejoin":"round"}));
+const lx = M.l + pw + 8 + li * 44;
+for (let i = 0; i <= 2; i++){
+const v = t2 * i / 2;
+const t = fnEl("text", {x:lx, y:yy(v)+3.5, fill:s.c, "font-size":10});
+t.textContent = s.money ? (v >= 1e6 ? (v/1e6).toFixed(1) + "м" : Math.round(v/1000) + "к") : Math.round(v);
+svg.appendChild(t);
+}
+});
+
+const skip = Math.max(1, Math.ceil(n / 14));
+rows.forEach((r, i) => {
+if (i % skip) return;
+const t = fnEl("text", {x:cx(i), y:H-12, "text-anchor":"middle", fill:"#8a9378", "font-size":10});
+t.textContent = r.date.slice(5);
+svg.appendChild(t);
+});
+
+const tip = document.getElementById("fntip");
+rows.forEach((r, i) => {
+const hit = fnEl("rect", {x:M.l+step*i, y:M.t, width:step, height:ph, fill:"transparent"});
+hit.style.cursor = "crosshair";
+hit.addEventListener("mouseenter", () => {
+let html = '<div class="d">' + r.date + '</div>';
+steps.forEach(s => { if (!FN_ON[s.k]) return;
+const v = r[s.k] || 0;
+html += '<div class="r"><span><i style="background:' + s.c + '"></i>' + s.n + '</span><b>' + (s.money ? fnMoney(v) : fmtNum(v)) + '</b></div>';
+});
+const st = steps.filter(s => s.kind === "bar" || s.k === "sales");
+let cv = "";
+for (let j = 1; j < st.length; j++){
+const a = r[st[j].k] || 0, b = r[st[j-1].k] || 0;
+cv += (cv ? " \u00b7 " : "") + st[j-1].n.split(" ")[0] + "\u2192" + st[j].n.split(" ")[0] + " <b>" + (b ? fmt2(a/b*100) + "%" : "\u2014") + "</b>";
+}
+if (cv) html += '<div class="cv">' + cv + '</div>';
+tip.innerHTML = html; tip.classList.add("on");
+const box = svg.getBoundingClientRect();
+const px = (M.l + step * (i + 0.5)) / W * box.width;
+tip.style.left = Math.min(Math.max(px - 105, 4), box.width - 230) + "px";
+tip.style.top = "8px";
+});
+hit.addEventListener("mouseleave", () => tip.classList.remove("on"));
+svg.appendChild(hit);
+});
+}
+
+function drawPeriods(rows, stages){
+const svg = document.getElementById("fnsvg2");
+svg.innerHTML = "";
+const W = 1060, H = 360;
+const parts = Math.min(4, rows.length);
+if (parts < 2){ document.getElementById("fnwhint").textContent = "Мало данных для сравнения периодов."; return; }
+const size = Math.ceil(rows.length / parts);
+const buckets = [];
+for (let i = 0; i < rows.length; i += size) buckets.push(rows.slice(i, i + size));
+const colW = W / buckets.length, padX = 26;
+const topY = 44, botY = H - 30;
+const stepH = (botY - topY) / stages.length;
+const convOf = b => stages.map((s, i) => i === 0 ? null : (sum(b, stages[i-1].k) ? sum(b, s.k) / sum(b, stages[i-1].k) * 100 : null));
+const base = convOf(buckets[0]);
+
+buckets.forEach((b, bi) => {
+const x0 = colW * bi, cxc = x0 + colW / 2;
+const tots = stages.map(s => sum(b, s.k));
+const head = tots[0] || 1;
+const maxW = colW - padX * 2;
+const wOf = v => Math.max(3, Math.sqrt(v / head) * maxW);
+const t = fnEl("text", {x:cxc, y:20, "text-anchor":"middle", fill:"#12160f", "font-size":12, "font-weight":"700"});
+t.textContent = b[0].date.slice(5) + " \u2014 " + b[b.length-1].date.slice(5);
+svg.appendChild(t);
+const conv = convOf(b);
+stages.forEach((s, i) => {
+const yTop2 = topY + stepH * i, yBot = yTop2 + stepH * 0.62;
+const w1 = wOf(tots[i]), w2 = wOf(tots[i+1] != null ? tots[i+1] : tots[i]);
+svg.appendChild(fnEl("path", {d:"M" + (cxc-w1/2) + "," + yTop2 + "L" + (cxc+w1/2) + "," + yTop2 + "L" + (cxc+w2/2) + "," + yBot + "L" + (cxc-w2/2) + "," + yBot + "Z", fill:s.c, opacity:0.92}));
+const lb = fnEl("text", {x:cxc, y:yTop2+stepH*0.4, "text-anchor":"middle", fill:"#fff", "font-size":11, "font-weight":"700"});
+lb.textContent = fmtNum(tots[i]);
+svg.appendChild(lb);
+if (i > 0 && conv[i] != null){
+const d = base[i] != null ? conv[i] - base[i] : 0;
+const cl = fnEl("text", {x:cxc, y:yTop2-4, "text-anchor":"middle", fill: bi === 0 ? "#6f7a63" : (d < -1 ? "#d64545" : d > 1 ? "#1f9d55" : "#6f7a63"), "font-size":10.5, "font-weight":"600"});
+cl.textContent = fmt2(conv[i]) + "%" + (bi > 0 && base[i] != null ? (d >= 0 ? "  +" : "  ") + fmt2(d) : "");
+svg.appendChild(cl);
+}
+});
+});
+
+document.getElementById("fnwhint").textContent =
+"Каждая воронка нормирована к своим кликам, поэтому сравнивается форма, а не объём трафика. Ширина в масштабе корня \u2014 иначе нижние ступени были бы неразличимы. Проценты \u2014 конверсия перехода; цветом показано отклонение от первого периода.";
 }
 function mkChart(id,cfg){ if(typeof Chart==="undefined") return; if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id),cfg); }
 
