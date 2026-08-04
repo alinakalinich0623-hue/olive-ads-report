@@ -177,28 +177,53 @@ function filterDaily(mode){
 function sum(a,k){return a.reduce((s,x)=>s+(x[k]||0),0);}
 
 function renderKPIs(rows){
-  const cost=sum(rows,"cost"), impr=sum(rows,"impr"), reach=sum(rows,"reach"),
-        clicks=sum(rows,"clicks"), purch=sum(rows,"purch"), val=sum(rows,"value"),
-        leads=sum(rows,"leads"), msg=sum(rows,"msg");
-  const ctr = impr? clicks/impr*100:0;
-  const cpc = clicks? cost/clicks:0;
-  const cpm = impr? cost/impr*1000:0;
-  const roas = cost? val/cost:0;
-  const cpl = (leads+msg)? cost/(leads+msg):0;
-  const K=[
-    ["Расход",fmtMoney(cost),""],
-    ["Показы",fmtNum(impr),"CPM "+fmtMoney(cpm)],
-    ["Охват",fmtNum(reach),""],
-    ["Клики",fmtNum(clicks),"CTR "+fmt2(ctr)+"% · CPC "+CUR+fmt2(cpc)],
-    ["Покупки",fmtNum(purch),val?("выручка "+fmtMoney(val)):"—"],
-    ["ROAS",purch?fmt2(roas)+"x":"—","hl"],
-    ["Лиды (форма)",fmtNum(leads),""],
-    ["Переписки",fmtNum(msg),""],
-    ["Заявки всего",fmtNum(leads+msg),"CPL "+CUR+fmt2(cpl)],
-  ];
-  document.getElementById("kpis").innerHTML = K.map(k=>
-    `<div class="kpi ${k[3]==='hl'||k[2]==='hl'?'hl':''}"><div class="l">${k[0]}</div><div class="v">${k[1]}</div><div class="s">${k[2]==='hl'?'':k[2]}</div></div>`
-  ).join("");
+const cost=sum(rows,"cost"), impr=sum(rows,"impr"), reach=sum(rows,"reach"),
+clicks=sum(rows,"clicks"), purch=sum(rows,"purch"), val=sum(rows,"value"),
+leads=sum(rows,"leads"), msg=sum(rows,"msg");
+const ctr = impr? clicks/impr*100:0;
+const cpc = clicks? cost/clicks:0;
+const cpm = impr? cost/impr*1000:0;
+const roas = cost? val/cost:0;
+const cpl = (leads+msg)? cost/(leads+msg):0;
+const K=[
+["Расход",fmtMoney(cost),""],
+["Показы",fmtNum(impr),"CPM "+fmtMoney(cpm)],
+["Охват",fmtNum(reach),""],
+["Клики",fmtNum(clicks),"CTR "+fmt2(ctr)+"% · CPC "+CUR+fmt2(cpc)],
+["Покупки",fmtNum(purch),val?("выручка "+fmtMoney(val)):"—"],
+["ROAS",purch?fmt2(roas)+"x":"—","hl"],
+["Лиды (форма)",fmtNum(leads),""],
+["Переписки",fmtNum(msg),""],
+["Заявки всего",fmtNum(leads+msg),"CPL "+CUR+fmt2(cpl)],
+];
+
+// --- Продажи из Битрикса: цена продажи и цена лида, в тенге ---
+// День продажи берётся из поля «Дата оплаты», а не из текущей стадии сделки:
+// стадия здесь — состояние клиента, сделка уезжает дальше по воронке,
+// и счёт по стадии менялся бы задним числом.
+const B = (DATA.meta && DATA.meta.bitrix) || {};
+const fmtKzt = v => (Math.round(v)||0).toLocaleString("ru-RU") + " ₸";
+if(B.ok){
+const fx = B.fx_rate || 0;
+const costKzt = cost * fx;
+const sales = sum(rows,"sales");
+const revenue = sum(rows,"sales_revenue");
+const bleads = sum(rows,"bleads");
+const cac = sales ? costKzt/sales : 0;
+const cplKzt = bleads ? costKzt/bleads : 0;
+const check = sales ? revenue/sales : 0;
+K.push(
+["Продажи (Битрикс)", fmtNum(sales), revenue? ("выручка "+fmtKzt(revenue)) : "—"],
+["Цена продажи", sales? fmtKzt(cac) : "—", sales? ("чек "+fmtKzt(check)) : "нет продаж"],
+["Цена лида", bleads? fmtKzt(cplKzt) : "—", bleads? (fmtNum(bleads)+" заявок") : "нет заявок"]
+);
+} else if(B.note){
+K.push(["Продажи (Битрикс)","—", B.note]);
+}
+
+document.getElementById("kpis").innerHTML = K.map(k=>
+`<div class="kpi ${k[3]==='hl'||k[2]==='hl'?'hl':''}"><div class="l">${k[0]}</div><div class="v">${k[1]}</div><div class="s">${k[2]==='hl'?'':k[2]}</div></div>`
+).join("");
 }
 
 function mkChart(id,cfg){ if(typeof Chart==="undefined") return; if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id),cfg); }
