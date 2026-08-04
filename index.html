@@ -116,6 +116,12 @@ tbody tr:hover{background:#fafcf2;}
     </div>
   </div>
 
+  <div class="section" id="bxsection" style="display:none">
+    <h2>Заявки и продажи из Битрикса</h2>
+    <div class="hint" id="bxhint"></div>
+    <div class="kpis" id="bxkpis"></div>
+  </div>
+
   <div class="section">
     <h2>Что продаёт: формат и цель</h2>
     <div class="hint">Разрез за весь период. Продажи/ROAS считаются Meta Pixel (с 23.06.2026).</div>
@@ -197,33 +203,49 @@ const K=[
 ["Заявки всего",fmtNum(leads+msg),"CPL "+CUR+fmt2(cpl)],
 ];
 
-// --- Продажи из Битрикса: цена продажи и цена лида, в тенге ---
-// День продажи берётся из поля «Дата оплаты», а не из текущей стадии сделки:
-// стадия здесь — состояние клиента, сделка уезжает дальше по воронке,
-// и счёт по стадии менялся бы задним числом.
-const B = (DATA.meta && DATA.meta.bitrix) || {};
-const fmtKzt = v => (Math.round(v)||0).toLocaleString("ru-RU") + " ₸";
-if(B.ok){
-const fx = B.fx_rate || 0;
-const costKzt = cost * fx;
-const sales = sum(rows,"sales");
-const revenue = sum(rows,"sales_revenue");
-const bleads = sum(rows,"bleads");
-const cac = sales ? costKzt/sales : 0;
-const cplKzt = bleads ? costKzt/bleads : 0;
-const check = sales ? revenue/sales : 0;
-K.push(
-["Продажи (Битрикс)", fmtNum(sales), revenue? ("выручка "+fmtKzt(revenue)) : "—"],
-["Цена продажи", sales? fmtKzt(cac) : "—", sales? ("чек "+fmtKzt(check)) : "нет продаж"],
-["Цена лида", bleads? fmtKzt(cplKzt) : "—", bleads? (fmtNum(bleads)+" заявок") : "нет заявок"]
-);
-} else if(B.note){
-K.push(["Продажи (Битрикс)","—", B.note]);
-}
-
 document.getElementById("kpis").innerHTML = K.map(k=>
 `<div class="kpi ${k[3]==='hl'||k[2]==='hl'?'hl':''}"><div class="l">${k[0]}</div><div class="v">${k[1]}</div><div class="s">${k[2]==='hl'?'':k[2]}</div></div>`
 ).join("");
+}
+
+
+function renderBitrix(rows){
+const sec = document.getElementById("bxsection");
+const B = (DATA.meta && DATA.meta.bitrix) || {};
+if(!B.ok){ sec.style.display = "none"; return; }
+sec.style.display = "";
+
+const fx = B.fx_rate || 0;
+const costUsd = sum(rows,"cost");
+const costKzt = costUsd * fx;
+const bleads = sum(rows,"bleads");
+const sales = sum(rows,"sales");
+const revenue = sum(rows,"sales_revenue");
+
+const kzt = v => (Math.round(v)||0).toLocaleString("ru-RU") + " \u20b8";
+const usd = v => "$" + (v||0).toLocaleString("ru-RU",{maximumFractionDigits:2});
+
+const cplUsd = bleads ? costUsd/bleads : 0;
+const cplKzt = bleads ? costKzt/bleads : 0;
+const cacUsd = sales ? costUsd/sales : 0;
+const cacKzt = sales ? costKzt/sales : 0;
+const check = sales ? revenue/sales : 0;
+
+const K = [
+["Расход", usd(costUsd), kzt(costKzt)],
+["Заявки (Битрикс)", fmtNum(bleads), bleads? "входящие сделки" : "нет заявок"],
+["Цена лида", bleads? usd(cplUsd) : "\u2014", bleads? kzt(cplKzt) : "нет заявок"],
+["Продажи (Битрикс)", fmtNum(sales), sales? "оплаты" : "нет продаж"],
+["Цена продажи", sales? usd(cacUsd) : "\u2014", sales? kzt(cacKzt) : "нет продаж"],
+["Выручка", revenue? kzt(revenue) : "\u2014", sales? ("средний чек " + kzt(check)) : ""]
+];
+document.getElementById("bxkpis").innerHTML = K.map(k=>
+`<div class="kpi"><div class="l">${k[0]}</div><div class="v">${k[1]}</div><div class="s">${k[2]}</div></div>`
+).join("");
+
+document.getElementById("bxhint").textContent =
+"За выбранный период. Курс " + fmt2(fx) + " \u20b8/$. " + (B.note||"") +
+" Цифра сквозная: UTM в сделках не заполнены, поэтому в знаменателе все оплаты, а не только рекламные.";
 }
 
 function mkChart(id,cfg){ if(typeof Chart==="undefined") return; if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id),cfg); }
@@ -330,7 +352,7 @@ function apply(mode){
   if(rows.length){
     document.getElementById("plabel").textContent="Период: "+rows[0].date+" — "+rows[rows.length-1].date+" · "+rows.length+" дн.";
   }
-  renderKPIs(rows); renderCharts(rows);
+  renderKPIs(rows); renderCharts(rows); renderBitrix(rows);
 }
 
 let currentMode = "all";
