@@ -4,7 +4,7 @@ on:
   schedule:
     # каждый час, в :05 по UTC (Meta отдаёт статистику с задержкой)
     - cron: "5 * * * *"
-  workflow_dispatch: {}   # кнопка «Run workflow» для обновления вручную
+  workflow_dispatch: {} # кнопка «Run workflow» для обновления вручную
 
 permissions:
   contents: write
@@ -32,6 +32,16 @@ jobs:
           META_AD_ACCOUNT_ID: ${{ vars.META_AD_ACCOUNT_ID || 'act_1117251293638187' }}
           START_DATE: ${{ vars.START_DATE || '2025-12-12' }}
         run: python scripts/fetch_meta.py
+
+      # Дописывает в data.json продажи из Битрикса и курс доллара.
+      # Идёт строго после Meta: тот создаёт data.json, этот его дополняет.
+      - name: Дописать продажи из Битрикс24
+        env:
+          BITRIX_WEBHOOK: ${{ secrets.BITRIX_WEBHOOK }}
+          PAY_DATE_FIELD: ${{ vars.PAY_DATE_FIELD || 'UF_CRM_1771991929628' }}
+          LEAD_CATEGORY: ${{ vars.LEAD_CATEGORY || '9' }}
+          NEW_ONLY: ${{ vars.NEW_ONLY || '1' }}
+        run: python scripts/fetch_bitrix.py
 
       - name: Закоммитить обновлённые данные
         run: |
