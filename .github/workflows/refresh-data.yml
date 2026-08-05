@@ -48,6 +48,9 @@ jobs:
       - name: Дописать ступени воронки
         env:
           METRIKA_TOKEN: ${{ secrets.METRIKA_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          TRAFFIC_ONLY_AD: ${{ vars.TRAFFIC_ONLY_AD || '1' }}
           METRIKA_COUNTER: ${{ vars.METRIKA_COUNTER || '104935856' }}
           OLIVE_API_URL: ${{ secrets.OLIVE_API_URL }}
           OLIVE_API_KEY: ${{ secrets.OLIVE_API_KEY }}
