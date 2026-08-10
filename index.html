@@ -139,6 +139,13 @@ tbody tr:hover{background:#fafcf2;}
     <div class="hint" id="bxhint"></div>
     <div class="kpis" id="bxkpis"></div>
 
+<div class="section" id="cacsection" style="display:none">
+<h2>Стоимость нового клиента</h2>
+<div class="hint" id="cachint"></div>
+<div class="kpis" id="cackpis"></div>
+<div class="cardbox" style="margin-top:12px"><canvas id="c5" height="140"></canvas></div>
+</div>
+
   <div class="section" id="fnsection" style="display:none">
     <h2>Воронка: от клика до покупки</h2>
     <div class="hint" id="fnhint"></div>
@@ -150,6 +157,7 @@ tbody tr:hover{background:#fafcf2;}
     <div class="cardbox" style="margin-top:12px">
       <h3 style="margin:0 0 3px;font-size:14px;font-weight:800">Воронка по периодам: где ломается конверсия</h3>
       <div class="hint" id="fnwhint"></div>
+<div id="fnwlegend" style="display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 12px;font-size:12px;color:#3a4232"></div>
       <div class="fnplot"><svg id="fnsvg2" viewBox="0 0 1060 360" preserveAspectRatio="xMidYMid meet"></svg></div>
     </div>
   </div>
@@ -268,8 +276,8 @@ const K = [
 ["Расход", usd(costUsd), kzt(costKzt)],
 ["Заявки (Битрикс)", fmtNum(bleads), bleads? "входящие сделки" : "нет заявок"],
 ["Цена лида", bleads? usd(cplUsd) : "\u2014", bleads? kzt(cplKzt) : "нет заявок"],
-["Продажи (Битрикс)", fmtNum(sales), sales? "оплаты" : "нет продаж"],
-["Цена продажи", sales? usd(cacUsd) : "\u2014", sales? kzt(cacKzt) : "нет продаж"],
+["Новые клиенты", fmtNum(sales), sales? "первая оплата контакта" : "нет продаж"],
+["Цена нового клиента", sales? usd(cacUsd) : "\u2014", sales? kzt(cacKzt) : "нет продаж"],
 ["Выручка", revenue? kzt(revenue) : "\u2014", sales? ("средний чек " + kzt(check)) : ""]
 ];
 document.getElementById("bxkpis").innerHTML = K.map(k=>
@@ -284,6 +292,40 @@ document.getElementById("bxhint").textContent =
 
 /* Воронка: вложенные столбики, переключатели, тултип с конверсиями,
    воронки по периодам в корневом масштабе. Рисуется на SVG. */
+function renderCAC(rows){
+const sec=document.getElementById("cacsection"); if(!sec) return;
+const B=(DATA.meta&&DATA.meta.bitrix)||{};
+if(!B.ok||!rows.length){sec.style.display="none";return;}
+sec.style.display="";
+const fx=B.fx_rate||0;
+const kz=v=>(Math.round(v)||0).toLocaleString("ru-RU")+" ₸";
+const us=v=>"$"+(v||0).toLocaleString("ru-RU",{maximumFractionDigits:2});
+const costUsd=sum(rows,"cost"), costKzt=costUsd*fx;
+const nw=sum(rows,"sales"), all=sum(rows,"sales_all"), rep=Math.max(0,all-nw);
+const rev=sum(rows,"sales_revenue");
+const cacK=nw?costKzt/nw:0, cacU=nw?costUsd/nw:0, check=all?rev/all:0;
+const K=[
+["Расход",kz(costKzt),us(costUsd),""],
+["Новые клиенты",fmtNum(nw),nw?"первая оплата контакта":"нет новых оплат",""],
+["Цена нового клиента",nw?kz(cacK):"—",nw?us(cacU):"нет новых оплат","hl"],
+["Повторные оплаты",fmtNum(rep),"в цену клиента не входят",""],
+["Всего оплат",fmtNum(all),all?("средний чек "+kz(check)):"",""],
+["Выручка",rev?kz(rev):"—","по всем оплатам",""]
+];
+document.getElementById("cackpis").innerHTML=K.map(k=>
+'<div class="kpi'+(k[3]==="hl"?" hl":"")+'"><div class="l">'+k[0]+'</div><div class="v">'+k[1]+'</div><div class="s">'+k[2]+'</div></div>').join("");
+document.getElementById("cachint").textContent=
+"Клиент считается новым по первой оплате контакта в Битриксе — повторные покупки в знаменатель не идут. Цена нового клиента = весь расход Meta Ads за период ÷ новые клиенты, курс "+fmt2(fx)+" ₸/$. Линия на графике — цена по скользящему окну 7 дней, чтобы она не скакала из-за дней без оплат. Цифра сквозная: UTM в сделках не заполнены, поэтому среди новых клиентов есть и нерекламные.";
+const labels=rows.map(x=>x.date.slice(5));
+const roll=rows.map(function(_,i){var a=Math.max(0,i-6),c=0,s=0;for(var j=a;j<=i;j++){c+=rows[j].cost||0;s+=rows[j].sales||0;}return s?Math.round(c*fx/s):null;});
+const grid={grid:{color:"#eef1e8"},ticks:{color:"#8a9378",font:{size:10}}};
+mkChart("c5",{type:"bar",data:{labels,datasets:[
+{type:"bar",label:"Новые клиенты",data:rows.map(x=>x.sales||0),backgroundColor:"#b7e400",yAxisID:"y"},
+{type:"line",label:"Цена нового клиента, ₸ (окно 7 дней)",data:roll,borderColor:"#12160f",tension:.3,pointRadius:0,spanGaps:true,yAxisID:"y1"}]},
+options:{responsive:true,plugins:{legend:{labels:{boxWidth:10,font:{size:11},color:"#3a4232"}},title:{display:true,text:"Новые клиенты и цена нового клиента",color:"#12160f",font:{size:13,weight:"700"}}},
+scales:{x:grid,y:{...grid,position:"left",beginAtZero:true},y1:{...grid,position:"right",beginAtZero:true,grid:{drawOnChartArea:false}}}}});
+}
+
 const FN_DEF = [
 {k:"clicks", n:"Клики по рекламе", c:"#7C5CD6", kind:"bar"},
 {k:"visits", n:"Визиты на сайте", c:"#2E86C1", kind:"bar"},
@@ -504,6 +546,15 @@ let note = "Каждая воронка нормирована к своим к�
 if (missing) note += " Заявки в воронке «Первичная продажа» ведутся с 26.02.2026, поэтому на более ранних отрезках эта ступень не показывается.";
 if (broken) note += " Звёздочкой помечены переходы с конверсией выше 100%: часть оплат приходит мимо этой воронки \u2014 повторные покупки и сделки, заведённые менеджером вручную. Строгой вложенности там нет.";
 document.getElementById("fnwhint").textContent = note;
+const lg = document.getElementById("fnwlegend");
+if (lg){
+lg.innerHTML = stages.map(s =>
+'<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:12px;height:12px;border-radius:3px;background:' + s.c + '"></span>' + s.n + '</span>'
+).join("")
++ '<span style="color:#6f7a63">% — конверсия из ступени выше</span>'
++ '<span style="color:#1f9d55">зелёный — лучше 1-го периода</span>'
++ '<span style="color:#d64545">красный — хуже</span>';
+}
 }
 function mkChart(id,cfg){ if(typeof Chart==="undefined") return; if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id),cfg); }
 
@@ -609,7 +660,7 @@ function apply(mode){
   if(rows.length){
     document.getElementById("plabel").textContent="Период: "+rows[0].date+" — "+rows[rows.length-1].date+" · "+rows.length+" дн.";
   }
-  renderKPIs(rows); renderCharts(rows); renderBitrix(rows); renderFunnel(rows);
+  renderKPIs(rows); renderCharts(rows); renderBitrix(rows); renderFunnel(rows); renderCAC(rows);
 }
 
 let currentMode = "all";
