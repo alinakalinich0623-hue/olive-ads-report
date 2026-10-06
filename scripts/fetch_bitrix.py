@@ -10,7 +10,7 @@
 Переменные окружения:
   BITRIX_WEBHOOK  — обязательный. Входящий вебхук, напр. https://segodnya.bitrix24.kz/rest/1/xxxx
   PAY_DATE_FIELD  — поле «Дата оплаты», по умолчанию UF_CRM_1771991929628
-  LEAD_CATEGORY   — воронка входящих заявок, по умолчанию 9 («Первичная продажа»)
+  SALES_CATEGORY  — воронка, в которой считаются оплаты, по умолчанию 13 (как в olive-reports)
   NEW_ONLY        — "1" (по умолчанию) считать только первую покупку клиента, "0" — все оплаты
   FX_FALLBACK     — резервный курс тенге за доллар, если внешний источник недоступен
 
@@ -32,7 +32,8 @@ import requests
 
 WEBHOOK = os.environ.get("BITRIX_WEBHOOK", "").strip().rstrip("/")
 PAY_FIELD = os.environ.get("PAY_DATE_FIELD", "UF_CRM_1771991929628").strip()
-LEAD_CATEGORY = os.environ.get("LEAD_CATEGORY", "9").strip()
+LEAD_CATEGORY = os.environ.get("LEAD_CATEGORY", "9").strip()  # больше не используется, оставлено для совместимости
+SALES_CATEGORY = os.environ.get("SALES_CATEGORY", "13").strip()
 NEW_ONLY = os.environ.get("NEW_ONLY", "1").strip() != "0"
 FX_FALLBACK = float(os.environ.get("FX_FALLBACK", "474") or 474)
 
@@ -105,6 +106,7 @@ def collect(since):
     #    Всю историю берём намеренно — по ней определяется, новый клиент или повторный.
     paid = bitrix_list("crm.deal.list", {
         "filter[>=" + PAY_FIELD + "]": "2000-01-01",
+        "filter[CATEGORY_ID]": SALES_CATEGORY,
         "select[0]": "ID",
         "select[1]": "CONTACT_ID",
         "select[2]": "OPPORTUNITY",
@@ -112,12 +114,14 @@ def collect(since):
         "order[DATE_CREATE]": "ASC",
     })
 
-    # 2) Заявки: сделки, СОЗДАННЫЕ в воронке лидов. Создание — событие, оно не «уезжает».
+    # 2) Заявки — так же, как в общем дашборде (olive-reports): новые чаты WhatsApp + Instagram.
+    #    Берём все сделки, созданные за период, и считаем те, у которых источник (SOURCE_ID)
+    #    содержит WZ_WHATSAPP или WZ_INSTAGRAM. Звонки и сделки без источника заявкой не считаются.
     leads = bitrix_list("crm.deal.list", {
-        "filter[CATEGORY_ID]": LEAD_CATEGORY,
         "filter[>=DATE_CREATE]": since,
         "select[0]": "ID",
         "select[1]": "DATE_CREATE",
+        "select[2]": "SOURCE_ID",
         "order[DATE_CREATE]": "ASC",
     })
 
@@ -144,7 +148,7 @@ def collect(since):
     by = {}
 
     def row(day):
-        return by.setdefault(day, {"sales": 0, "sales_all": 0, "revenue": 0.0, "bleads": 0})
+        return by.setdefault(day, {"sales": 0, "sales_all": 0, "revenue": 0.0, "bleads": 0, "bleads_wa": 0, "bleads_ig": 0})
 
     for s in sales:
         if s["day"] < since:
@@ -157,8 +161,15 @@ def collect(since):
 
     for d in leads:
         day = day_of(d.get("DATE_CREATE"))
-        if day:
+        src = str(d.get("SOURCE_ID") or "")
+        if not day:
+            continue
+        if "WZ_WHATSAPP" in src:
             row(day)["bleads"] += 1
+            row(day)["bleads_wa"] += 1
+        if "WZ_INSTAGRAM" in src:
+            row(day)["bleads"] += 1
+            row(day)["bleads_ig"] += 1
 
     return by, len(sales)
 
@@ -194,6 +205,8 @@ def main():
                 d["sales_all"] = r["sales_all"] if r else 0
                 d["sales_revenue"] = round(r["revenue"]) if r else 0
                 d["bleads"] = r["bleads"] if r else 0
+                d["bleads_wa"] = r["bleads_wa"] if r else 0
+                d["bleads_ig"] = r["bleads_ig"] if r else 0
             payload["meta"]["bitrix"] = {
                 "ok": True,
                 "fx_rate": round(rate, 4),
@@ -201,7 +214,8 @@ def main():
                 "fx_date": fx_date,
                 "new_only": NEW_ONLY,
                 "pay_field": PAY_FIELD,
-                "lead_category": LEAD_CATEGORY,
+                "lead_rule": "новые чаты WhatsApp + Instagram (SOURCE_ID), как в olive-reports",
+                "sales_category": SALES_CATEGORY,
                 "deals_scanned": total,
                 "note": (
                     "Продажа = день из поля «Дата оплаты», только первая покупка контакта."
